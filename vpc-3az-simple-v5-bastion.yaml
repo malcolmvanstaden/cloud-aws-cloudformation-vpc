@@ -1,0 +1,477 @@
+#==============================================================================
+#                               SIMPLE VPC W. BASTION
+#
+# AUTHOR:     https://malcolm.cloud | malcolmvs@gmail.com
+#
+#------------------------------------------------------------------------------
+# NOTES:
+# Quickly create a VPC with the following characteristics:
+# - 3 Tier Subnet Structure (Public, Private, Database) across 3 AZs (A,B,C)
+# - Creates: VPC, Subnets, IGW, Route Tables, SGs, Bastion Server (optional)
+#
+#------------------------------------------------------------------------------
+# DATE:       VER:  CHANGE:                                 
+# 2018-06-05  1     Initial version
+# 2019-06-07  2     Added bastion host option
+# 2020-01-31  3     Updated AMIs for AWS Linux
+# 2020-03-29  4     Changed bastion type to t3.nano
+# 2020-04-18  5     Updated AMIs to AWS Linux 2
+#
+#==============================================================================
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC
+
+
+#------------------------------------------------------------------------------
+# METADATA - TO ORGANISE INPUT GROUPS
+#------------------------------------------------------------------------------
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC Information"
+        Parameters:
+            - VpcName
+            - VpcOctet
+            - ManagementIP
+      - Label:
+          default: "Bastion Host (Optional)"
+        Parameters:
+            - DeployBastionHost
+            - KeyName
+
+
+#------------------------------------------------------------------------------
+# INPUT PARAMETERS
+#------------------------------------------------------------------------------
+Parameters:
+  VpcName:
+    Description: VPC Name. UPPERCASE with no spaces, "-VPC" will be appended on the end.
+    Type: String
+    MinLength: 2
+  VpcOctet:
+    Description: First two octets of CIDR. e.g. 10.1 or 10.2 etc...
+    Type: String
+    MinLength: 3
+    Default: '10.0'
+  ManagementIP:
+    Description: Management IP address in CIDR notation. e.g. 1.2.3.4/32
+    Type: String
+    MinLength: 9
+  DeployBastionHost:
+    Description: Deploy a Bastion host?
+    Type: String
+    Default: "No"
+    AllowedValues:
+      - "Yes"
+      - "No"
+  KeyName:
+    Description: Select a KeyPair even if not deploying a Bastion host
+    Type: AWS::EC2::KeyPair::KeyName
+
+
+#------------------------------------------------------------------------------
+# CONDITIONS
+#------------------------------------------------------------------------------
+Conditions:
+  CreateBastionServer: !Equals [ !Ref DeployBastionHost, "Yes" ]
+
+#------------------------------------------------------------------------------
+# MAPPINGS
+#------------------------------------------------------------------------------
+Mappings:
+  #----------------------------------------------------------------------------
+  # AMIs FOR AWS LINUX - 2020-04
+  #----------------------------------------------------------------------------
+  RegionMapAMI:
+    us-east-1:
+      AWSLinux2: ami-0323c3dd2da7fb37d
+    us-east-2:
+      AWSLinux2: ami-0f7919c33c90f5b58
+    us-west-1:
+      AWSLinux2: ami-06fcc1f0bc2c8943f
+    us-west-2:
+      AWSLinux2:  ami-0d6621c01e8c2de2c
+    ap-south-1:
+      AWSLinux2:  ami-0470e33cd681b2476
+    ap-northeast-2:
+      AWSLinux2: ami-01288945bd24ed49a
+    ap-southeast-1:
+      AWSLinux2: ami-0ec225b5e01ccb706
+    ap-southeast-2:
+      AWSLinux2: ami-0970010f37c4f9c8d
+    ap-northeast-1:
+      AWSLinux2: ami-0f310fced6141e627
+    eu-central-1:
+      AWSLinux2: ami-076431be05aaf8080
+    eu-west-1:
+      AWSLinux2: ami-06ce3edf0cff21f07
+    eu-west-2:
+      AWSLinux2: ami-01a6e31ac994bbc09
+    eu-west-3:
+      AWSLinux2: ami-00077e3fed5089981
+    eu-north-1:
+      AWSLinux2: ami-0b7a46b4bd694e8a6
+    sa-east-1:
+      AWSLinux2: ami-003449ffb2605a74c
+
+
+#------------------------------------------------------------------------------
+# RESOURCES
+#------------------------------------------------------------------------------
+Resources:
+  #----------------------------------------------------------------------------
+  # VPC
+  #----------------------------------------------------------------------------
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - VPC
+  #----------------------------------------------------------------------------
+  # Subnets
+  #----------------------------------------------------------------------------
+  #--- Public -----------------------------------------------------------------
+  SubnetPublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .11.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - a
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PUBLIC-A
+  SubnetPublicB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .12.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - b
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PUBLIC-B
+  SubnetPublicC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .13.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - c
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PUBLIC-C
+
+  #--- Private ----------------------------------------------------------------
+  SubnetPrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .21.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - a
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PRIVATE-A
+  SubnetPrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .22.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - b
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PRIVATE-B
+  SubnetPrivateC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .23.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - c
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - PRIVATE-C
+
+  #--- Database ---------------------------------------------------------------
+  SubnetDatabaseA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .31.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - a
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - DATABASE-A
+  SubnetDatabaseB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .32.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - b
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - DATABASE-B
+  SubnetDatabaseC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: myVPC
+      CidrBlock: !Join
+        - ''
+        - - !Ref VpcOctet
+          - .33.0/24
+      AvailabilityZone: !Join
+        - ''
+        - - !Ref AWS::Region
+          - c
+      Tags:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - DATABASE-C
+
+  #----------------------------------------------------------------------------
+  # Internet Gateway
+  #----------------------------------------------------------------------------
+  #--- Create Internet Gateway ------------------------------------------------
+  myInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - IGW
+  #--- Attach Internet Gateway ------------------------------------------------
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: myVPC
+      InternetGatewayId:
+        Ref: myInternetGateway
+
+  #----------------------------------------------------------------------------
+  # Routing Tables
+  #----------------------------------------------------------------------------
+  #--- Create Public Subnet Routing Table -------------------------------------
+  IGWRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: myVPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - RT-IGW
+
+  #--- Create Public Subnet Routes --------------------------------------------
+  IGWRoute:
+    Type: AWS::EC2::Route
+    DependsOn: myInternetGateway
+    Properties:
+      RouteTableId:
+        Ref: IGWRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: myInternetGateway
+
+  #--- Associate Public Subnets with IGW Route Table --------------------------
+  IGWSubnetPublicARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: SubnetPublicA
+      RouteTableId:
+        Ref: IGWRouteTable
+  IGWSubnetPublicBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: SubnetPublicB
+      RouteTableId:
+        Ref: IGWRouteTable
+  IGWSubnetPublicCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: SubnetPublicC
+      RouteTableId:
+        Ref: IGWRouteTable
+
+  #----------------------------------------------------------------------------
+  # Security Groups
+  #----------------------------------------------------------------------------
+  #--- Management -------------------------------------------------------------
+  SecurityGroupManagement:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Management Traffic
+      VpcId:
+        Ref: myVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: !Ref ManagementIP
+      - IpProtocol: tcp
+        FromPort: '3389'
+        ToPort: '3389'
+        CidrIp: !Ref ManagementIP
+      Tags:
+      - Key: Name
+        Value: !Join
+          - '-'
+          - - !Ref VpcName
+            - SG-Management
+
+  #----------------------------------------------------------------------------
+  # BASTION
+  #----------------------------------------------------------------------------
+  BastionHost:
+    Type: 'AWS::EC2::Instance'
+    Condition: CreateBastionServer
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap
+        - RegionMapAMI
+        - !Ref 'AWS::Region'
+        - AWSLinux2
+      InstanceType: 't3.nano'
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          SubnetId: !Ref SubnetPublicA
+          GroupSet:
+            - !Ref SecurityGroupManagement     
+      UserData:
+          Fn::Base64: !Sub |
+            #!/bin/sh
+            sudo yum -y update               
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref VpcName
+              - BASTION
+    DependsOn:
+        - SubnetPublicA
+        - SecurityGroupManagement
+
+
+#===============================================================================
+# OUTPUTS
+#===============================================================================
+Outputs:
+  BastionServerIP:
+    Condition: CreateBastionServer
+    Description: Bastion server IP address
+    Value: !GetAtt
+      - BastionHost
+      - PublicIp              
+
